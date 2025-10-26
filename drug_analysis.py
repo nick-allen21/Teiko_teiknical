@@ -77,3 +77,86 @@ def initialize_database(conn: sqlite3.Connection) -> None:
     )
     conn.commit()
 
+
+def _standardize_response(value: str | float | None) -> str | None:
+    if value is None or (isinstance(value, float) and np.isnan(value)):
+        return None
+    text = str(value).strip().lower()
+    if text in {"yes", "y", "true", "respond", "responder"}:
+        return "yes"
+    if text in {"no", "n", "false", "non-respond", "nonresponder", "non-responder"}:
+        return "no"
+    return text or None
+
+
+def load_csv_to_db(csv_path: str, conn: sqlite3.Connection) -> None:
+    if not os.path.exists(csv_path):
+        raise FileNotFoundError(f"CSV not found at {csv_path}")
+
+    df = pd.read_csv(csv_path)
+
+    required_columns = {
+        "project",
+        "subject",
+        "condition",
+        "age",
+        "sex",
+        "treatment",
+        "response",
+        "sample",
+        "sample_type",
+        "time_from_treatment_start",
+    } | set(POPULATION_COLUMNS)
+
+    missing = required_columns - set(df.columns)
+    if missing:
+        raise ValueError(f"CSV missing columns: {sorted(missing)}")
+
+    # Standardize response to yes/no/None
+    df["response"] = df["response"].apply(_standardize_response)
+
+    # Upsert samples
+    samples_df = df[
+        [
+            "sample",
+            "project",
+            "subject",
+            "condition",
+            "age",
+            "sex",
+            "treatment",
+            "response",
+            "sample_type",
+            "time_from_treatment_start",
+        ]
+    ].drop_duplicates(subset=["sample"]).copy()
+
+    samples_records: List[Tuple] = list(
+        samples_df.itertuples(index=False, name=None)
+    )
+
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO samples (
+            sample, project, subject, condition, age, sex, treatment, response, sample_type, time_from_treatment_start
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        samples_records,
+    )
+
+    # Prepare long-form cell_counts
+    long_rows: List[Tuple[str, str, int]] = []
+    for _, row in df.iterrows():
+        sample_id = row["sample"]
+        for population in POPULATION_COLUMNS:
+            count_value = int(row[population])
+            long_rows.append((sample_id, population, count_value))
+
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO cell_counts (sample, population, count)
+        VALUES (?, ?, ?)
+        """,
+        long_rows,
+    )
+    conn.commit()
