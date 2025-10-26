@@ -437,7 +437,9 @@ def run_streamlit_app():
             st.dataframe(by_sex)
 
 
-def run_cli(csv_path: str, db_path: str) -> None:
+def run_cli(csv_path: str, db_path: str, outdir: str) -> None:
+    os.makedirs(outdir, exist_ok=True)
+
     print("Initializing database and loading CSV...")
     conn = get_db_connection(db_path)
     initialize_database(conn)
@@ -447,10 +449,24 @@ def run_cli(csv_path: str, db_path: str) -> None:
     print("\nComputing summary table...")
     summary_df = compute_summary_table(conn)
     print(summary_df.head(10).to_string(index=False))
+    summary_path = os.path.join(outdir, "summary_table.csv")
+    summary_df.to_csv(summary_path, index=False)
+    print(f"Saved summary to {summary_path}")
 
     print("\nAnalyzing responders vs non-responders (melanoma, PBMC, miraclib)...")
-    results_df, _ = analyze_responders_vs_nonresponders(summary_df)
+    results_df, figures = analyze_responders_vs_nonresponders(summary_df)
     print(results_df.to_string(index=False))
+    analysis_csv = os.path.join(outdir, "responder_analysis.csv")
+    results_df.to_csv(analysis_csv, index=False)
+    print(f"Saved analysis table to {analysis_csv}")
+    # Save figures as HTML to avoid image engine dependency
+    for i, fig in enumerate(figures):
+        fig_path = os.path.join(outdir, f"responder_boxplot_{i+1}.html")
+        try:
+            fig.write_html(fig_path, include_plotlyjs="cdn")
+            print(f"Saved analysis figure to {fig_path}")
+        except Exception as e:
+            print(f"Warning: failed to save figure {i+1}: {e}")
 
     print("\nSubset analysis: baseline melanoma PBMC samples on miraclib")
     subset_df, by_project, by_response, by_sex = subset_baseline_melanoma_pbmc_miraclib(conn)
@@ -463,11 +479,22 @@ def run_cli(csv_path: str, db_path: str) -> None:
     print("\nSubject counts by sex:")
     print(by_sex.to_string(index=False))
 
+    subset_path = os.path.join(outdir, "subset_samples.csv")
+    by_project_path = os.path.join(outdir, "subset_counts_by_project.csv")
+    by_response_path = os.path.join(outdir, "subset_subjects_by_response.csv")
+    by_sex_path = os.path.join(outdir, "subset_subjects_by_sex.csv")
+    subset_df.to_csv(subset_path, index=False)
+    by_project.to_csv(by_project_path, index=False)
+    by_response.to_csv(by_response_path, index=False)
+    by_sex.to_csv(by_sex_path, index=False)
+    print(f"Saved subset outputs to {outdir}")
+
 
 def main():
     parser = argparse.ArgumentParser(description="Drug analysis toolkit and dashboard")
     parser.add_argument("--csv", dest="csv_path", default=CSV_DEFAULT_PATH, help="Path to cell-count.csv")
     parser.add_argument("--db", dest="db_path", default=DATABASE_DEFAULT_PATH, help="Path to SQLite DB file")
+    parser.add_argument("--outdir", dest="outdir", default="results", help="Directory to save outputs")
     subparsers = parser.add_subparsers(dest="command")
 
     subparsers.add_parser("init-db", help="Initialize the database schema")
@@ -486,6 +513,7 @@ def main():
         return
     if args.command == "load":
         conn = get_db_connection(args.db_path)
+        
         initialize_database(conn)
         load_csv_to_db(args.csv_path, conn)
         print("CSV loaded into DB.")
@@ -497,12 +525,27 @@ def main():
             print("No data. Initialize DB and load CSV first.")
         else:
             print(df.head(50).to_string(index=False))
+            os.makedirs(args.outdir, exist_ok=True)
+            summary_path = os.path.join(args.outdir, "summary_table.csv")
+            df.to_csv(summary_path, index=False)
+            print(f"Saved summary to {summary_path}")
         return
     if args.command == "analyze":
         conn = get_db_connection(args.db_path)
         df = compute_summary_table(conn)
-        results, _ = analyze_responders_vs_nonresponders(df)
+        results, figures = analyze_responders_vs_nonresponders(df)
         print(results.to_string(index=False))
+        os.makedirs(args.outdir, exist_ok=True)
+        analysis_csv = os.path.join(args.outdir, "responder_analysis.csv")
+        results.to_csv(analysis_csv, index=False)
+        print(f"Saved analysis table to {analysis_csv}")
+        for i, fig in enumerate(figures):
+            fig_path = os.path.join(args.outdir, f"responder_boxplot_{i+1}.html")
+            try:
+                fig.write_html(fig_path, include_plotlyjs="cdn")
+                print(f"Saved analysis figure to {fig_path}")
+            except Exception as e:
+                print(f"Warning: failed to save figure {i+1}: {e}")
         return
     if args.command == "subset":
         conn = get_db_connection(args.db_path)
@@ -515,10 +558,20 @@ def main():
         print(by_response.to_string(index=False))
         print("\nSubject counts by sex:")
         print(by_sex.to_string(index=False))
+        os.makedirs(args.outdir, exist_ok=True)
+        subset_path = os.path.join(args.outdir, "subset_samples.csv")
+        by_project_path = os.path.join(args.outdir, "subset_counts_by_project.csv")
+        by_response_path = os.path.join(args.outdir, "subset_subjects_by_response.csv")
+        by_sex_path = os.path.join(args.outdir, "subset_subjects_by_sex.csv")
+        subset_df.to_csv(subset_path, index=False)
+        by_project.to_csv(by_project_path, index=False)
+        by_response.to_csv(by_response_path, index=False)
+        by_sex.to_csv(by_sex_path, index=False)
+        print(f"Saved subset outputs to {args.outdir}")
         return
     if args.command == "run-all" or args.command is None:
         # default: run the full pipeline in CLI mode
-        run_cli(args.csv_path, args.db_path)
+        run_cli(args.csv_path, args.db_path, args.outdir)
 
 
 if __name__ == "__main__":

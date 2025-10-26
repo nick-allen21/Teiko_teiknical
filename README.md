@@ -42,3 +42,53 @@ Bob also wants to explore specific subsets of the data to understand early treat
 - How many subjects were responders/non-responders 
 
 - How many subjects were males/females
+
+`How to Run:`
+ 
+Part 1 — Data Management (create DB and load CSV)
+- Initialize database schema
+```bash
+python drug_analysis.py --db teiko.sqlite init-db
+```
+- Load CSV into the database
+```bash
+python drug_analysis.py --csv data/cell-count.csv --db teiko.sqlite load
+```
+- One-shot full pipeline (init, load, summarize, analyze, subset) and save outputs to results/
+```bash
+python drug_analysis.py --csv data/cell-count.csv --db teiko.sqlite --outdir results run-all
+```
+
+Part 2 — Initial Analysis (summary table of relative frequencies)
+- Compute summary and save to `results/summary_table.csv` (also prints a preview to terminal)
+```bash
+python drug_analysis.py --db teiko.sqlite --outdir results summary
+```
+Outputs:
+- `results/summary_table.csv` — columns: `sample, total_count, population, count, percentage, project, subject, condition, age, sex, treatment, response, sample_type, time_from_treatment_start`
+
+Part 3 — Statistical Analysis (responders vs non-responders)
+- Compare melanoma PBMC samples on miraclib: saves stats table and boxplot
+```bash
+python drug_analysis.py --db teiko.sqlite --outdir results analyze
+```
+Outputs:
+- `results/responder_analysis.csv` — per-population Mann–Whitney U p-values, BH-FDR adjusted p-values, Cliff’s delta, medians, and N per group
+- `results/responder_boxplot_1.html` — interactive Plotly boxplot of relative frequencies by response status
+
+Part 4 — Data Subset Analysis (baseline melanoma PBMC on miraclib)
+- Generate baseline subset and rollups
+```bash
+python drug_analysis.py --db teiko.sqlite --outdir results subset
+```
+Outputs:
+- `results/subset_samples.csv` — all baseline melanoma PBMC samples on miraclib
+- `results/subset_counts_by_project.csv` — count of samples by project
+- `results/subset_subjects_by_response.csv` — subject counts by responder/non-responder
+- `results/subset_subjects_by_sex.csv` — subject counts by sex
+
+Notes
+- Primary implementation file: `drug_analysis.py`
+- Default input CSV: `data/cell-count.csv`
+- Default database file: `teiko.sqlite`
+- Default output directory: `results/` (created automatically if missing)
